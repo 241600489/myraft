@@ -1,0 +1,21 @@
+syntax = "proto3";
+package raftpb;
+// service 定义开放调用的服务，即 UserInfoService 微服务
+service Raft{
+    rpc requestVote(VoteRequest) returns (VoteResponse);
+}
+// message 对应生成代码的 struct
+// 定义客户端请求的数据格式
+message VoteRequest{
+    // [修饰符] 类型 字段名= 标识符
+    int32 term =1;
+    int32 candidateId =2;
+    int64 lastLogIndex=3;
+}
+
+message VoteResponse{
+    // [修饰符] 类型 字段名= 标识符
+    int32 term=1;//当前任期号，供候选者更新自己
+    bool voteGranted=2;// 为true 代表 候选者赢得选票
+
+}
