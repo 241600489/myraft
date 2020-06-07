@@ -53,3 +53,7 @@ func (ph *ProcessHandler) countVotes() (granted int, rejected int, re VoteResult
 	re = VoteLost
 	return granted, rejected, re
 }
+
+func (ph *ProcessHandler) ResetVotes() {
+	ph.Votes = make(map[uint64]bool)
+}

@@ -1,4 +1,4 @@
-package tranport
+package transport
 
 import "myraft/member"
 
@@ -20,6 +20,7 @@ type RaftMessage struct {
 	From     uint64 //从哪里来
 	To       uint64 //发送给谁
 	Type     MessageType
+	Success  bool //是否成功
 	Term     uint64
 	LogIndex uint64
 	Entries  []Entry
@@ -35,7 +36,7 @@ func (tr *Transport) HandleMessage(in *RaftMessage, resp *RaftMessage) error {
 	return nil
 }
 
-func (tr *Transport) sendMessage(in *RaftMessage) {
+func (tr *Transport) SendMessage(in RaftMessage) {
 	//发送 rpc 消息
 }
 
