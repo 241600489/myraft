@@ -7,6 +7,7 @@ import (
 	"myraft/member"
 	"myraft/transport"
 	"sync"
+	"time"
 )
 
 // 代表着 raft 中的peer node 可以代表是leader 也可能是 follower 或者 candidate
@@ -27,15 +28,15 @@ type Raft struct {
 	lastApplied int           // 应用到状态机中的最新的日志index
 	id          uint64        //机器唯一标识
 	//leader 所有
-	nextIndex        map[uint64]uint64 //对于每台服务器，要发送到该服务器的下一个日志条目的索引(初始化为leader lastlog索引index +1)
-	matchIndex       map[uint64]uint64 //对于每个服务器，在服务器上复制已知的最高日志条目的索引(初始化为0,单调递增)
-	electionTimeout  int64             // election timeout选举超时是指followers跟随者成为candidates候选者之前所等待的时间 默认是在150 毫秒到300 毫秒之间
-	heartBeatTimeout int64             //心跳间隔
-	peers            []uint64
-	localAddr        string
-	pr               *ProcessHandler
-	transport        *transport.Transport
-	lead             uint64
+	nextIndex      map[uint64]uint64 //对于每台服务器，要发送到该服务器的下一个日志条目的索引(初始化为leader lastlog索引index +1)
+	matchIndex     map[uint64]uint64 //对于每个服务器，在服务器上复制已知的最高日志条目的索引(初始化为0,单调递增)
+	electionTimer  *time.Timer       // election timeout选举超时是指followers跟随者成为candidates候选者之前所等待的时间 默认是在150 毫秒到300 毫秒之间
+	heartBeatTimer *time.Timer       //心跳间隔
+	peers          []uint64
+	localAddr      string
+	pr             *ProcessHandler
+	transport      *transport.Transport
+	lead           uint64
 }
 
 func NewServer(c *config.RaftConfig) *Raft {
@@ -50,7 +51,8 @@ func NewServer(c *config.RaftConfig) *Raft {
 		nextIndex:   nil,
 		matchIndex:  nil,
 	}
-	r.electionTimeout = RandInt64(150, 300)
+	r.electionTimer = time.NewTimer(time.Millisecond * time.Duration(RandInt64(150, 300)))
+	r.heartBeatTimer = time.NewTimer(time.Millisecond * time.Duration(RandInt64(100, 150)))
 	//生成 transport
 	rc := member.NewRaftCluster(c.LocalAddr, c.ClusterAddr)
 	r.transport = transport.NewTransport(rc)
@@ -58,6 +60,7 @@ func NewServer(c *config.RaftConfig) *Raft {
 	r.peers = rc.Peers()
 	r.pr = MakeProcessHandler(r.peers)
 	r.localAddr = c.LocalAddr
+	go r.run()
 	return r
 }
 
@@ -126,14 +129,37 @@ func (r *Raft) handle(rm transport.RaftMessage) error {
 			r.becomeFollower(rm.Term, rm.From)
 			return nil
 		case FOLLOWER:
-			//重置选举定时器
+			//判断term 大小
+			if rm.Term >= r.currentTerm {
+				//接受
+				if rm.Term > r.currentTerm {
+					log.Printf("change term ,receive heart from id:%d,its term:%d > current term:%d,current id:%d ",
+						rm.From, rm.Term, r.currentTerm, r.id)
+					r.rwLock.Lock()
+					r.currentTerm = rm.Term
+					r.rwLock.Unlock()
+				}
+				log.Printf("accept success,receive heartbeat from id:%d,its term:%d,current term:%d,id:%d", rm.From, rm.Term, r.currentTerm, r.id)
+				r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
+				r.transport.SendMessage(transport.RaftMessage{From: r.id, To: rm.From, Success: true, Type: transport.MsgHeartBeatResp})
+			} else {
+				//不接受
+				log.Printf("accept fail,,receive heartbeat from id:%d,its term:%d,current term:%d,id:%d",
+					rm.From, rm.Term, r.currentTerm, r.id)
+				r.transport.SendMessage(transport.RaftMessage{To: rm.From, From: r.id, Success: false, Term: r.currentTerm, Type: transport.MsgHeartBeatResp})
+			}
 			return nil
 		}
 		return nil
 
 	case transport.MsgHeartBeatResp:
 		//todo 处理心跳响应信息
-
+		if rm.Success {
+			log.Printf("accept heat beat success from %d,current id:%d", rm.From, r.id)
+		} else {
+			log.Printf("accept heart beat fail,from id:%d, its term:%d,current term:%d id:%d",
+				rm.From, rm.Term, r.currentTerm, r.id)
+		}
 		return nil
 	}
 	return nil
@@ -144,11 +170,20 @@ func (r *Raft) becomeLeader() {
 	r.rwLock.Unlock()
 	r.state = LEADER
 	r.voteFor = 0
+	r.heartBeatTimer =
+		time.NewTimer(time.Millisecond * time.Duration(RandInt64(100, 150)))
 	r.pr.ResetVotes()
 }
 
 func (r *Raft) broadcastAppend() {
-
+	r.rwLock.RLock()
+	defer r.rwLock.RUnlock()
+	for _, peerId := range r.peers {
+		if r.id == peerId {
+			continue
+		}
+		r.transport.SendMessage(transport.RaftMessage{From: r.id, To: peerId, Term: r.currentTerm, Type: transport.MsgHeartbeat})
+	}
 }
 
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
@@ -158,6 +193,50 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.voteFor = 0
 	r.lead = lead
 	r.state = FOLLOWER
-	r.electionTimeout = RandInt64(150, 300)
+	r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
 	r.pr.ResetVotes()
+}
+
+func (r *Raft) run() {
+	for {
+		select {
+		case <-r.electionTimer.C:
+			if r.state == LEADER || r.state == CANDIDATE {
+				//todo 当为candidate时则说明 遇到网络延迟没有接收到大多数票
+				continue
+			}
+			log.Printf("id:%d will become candidate ", r.id)
+			r.becomeCandidate()
+			r.broadcastVote()
+
+		case <-r.heartBeatTimer.C:
+			if r.state == LEADER {
+				r.broadcastAppend()
+			} else {
+				continue
+			}
+		}
+	}
+}
+
+func (r *Raft) becomeCandidate() {
+	r.rwLock.Lock()
+	r.currentTerm++
+	r.state = CANDIDATE
+	r.lead = 0
+	r.voteFor = r.id
+	r.pr.recordVote(r.id, true)
+	r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
+	r.rwLock.Unlock()
+}
+
+func (r *Raft) broadcastVote() {
+	r.rwLock.RLock()
+	defer r.rwLock.RUnlock()
+	for _, peerId := range r.peers {
+		if r.id == peerId {
+			continue
+		}
+		r.transport.SendMessage(transport.RaftMessage{From: r.id, To: peerId, Term: r.currentTerm, LogIndex: r.commitIndex, Type: transport.MsgVote})
+	}
 }

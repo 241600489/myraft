@@ -26,7 +26,8 @@ type RaftMessage struct {
 	Entries  []Entry
 }
 type Transport struct {
-	rc *member.RaftCluster
+	rc      *member.RaftCluster
+	msgWait chan RaftMessage
 }
 
 //处理rpc 消息
@@ -37,12 +38,14 @@ func (tr *Transport) HandleMessage(in *RaftMessage, resp *RaftMessage) error {
 }
 
 func (tr *Transport) SendMessage(in RaftMessage) {
-	//发送 rpc 消息
+	//直接放到通道里
+	tr.msgWait <- in
 }
 
 func NewTransport(rc *member.RaftCluster) *Transport {
 	tr := &Transport{
-		rc: rc,
+		rc:      rc,
+		msgWait: make(chan RaftMessage, 50),
 	}
 	return tr
 }

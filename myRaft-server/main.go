@@ -15,8 +15,8 @@ const (
 )
 
 func main() {
-	var configPaths = [3]string{"/home/liangziqiang/IdeaProjects/study/myraft/server.properties",
-		"/home/liangziqiang/IdeaProjects/study/myraft/server1.properties", "/home/liangziqiang/IdeaProjects/study/myraft/server2.properties"}
+	var configPaths = [3]string{"C:\\study\\myraft\\server.properties",
+		"C:\\study\\myraft\\server1.properties", "C:\\study\\myraft\\server2.properties"}
 	for _, item := range configPaths {
 		go initRaft(item)
 	}
