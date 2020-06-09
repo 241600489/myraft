@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
-	"myraft"
 	"myraft/config"
+	"myraft/raft"
 	"net"
 	"net/rpc"
+	"strconv"
 	"time"
 )
 
@@ -15,8 +16,8 @@ const (
 )
 
 func main() {
-	var configPaths = [3]string{"C:\\study\\myraft\\server.properties",
-		"C:\\study\\myraft\\server1.properties", "C:\\study\\myraft\\server2.properties"}
+	var configPaths = [3]string{"/home/liangziqiang/IdeaProjects/study/myraft/server.properties",
+		"/home/liangziqiang/IdeaProjects/study/myraft/server1.properties", "/home/liangziqiang/IdeaProjects/study/myraft/server2.properties"}
 	for _, item := range configPaths {
 		go initRaft(item)
 	}
@@ -26,8 +27,8 @@ func main() {
 
 func initRaft(configPath string) {
 	c, _ := config.NewConfig(configPath)
-	raftServer := myraft.NewServer(c)
-	_ = rpc.RegisterName("Transport", raftServer.Transport())
+	raftServer := raft.NewServer(c)
+	_ = rpc.RegisterName("Transport"+strconv.FormatUint(raftServer.ID(), 10), raftServer.Transport())
 	lis, e := net.Listen("tcp", c.LocalAddr)
 
 	if e != nil {

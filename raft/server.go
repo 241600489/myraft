@@ -1,11 +1,11 @@
-package myraft
+package raft
 
 import (
 	"log"
 	"math/rand"
 	"myraft/config"
 	"myraft/member"
-	"myraft/transport"
+	"myraft/raft/transport"
 	"sync"
 	"time"
 )
@@ -53,7 +53,7 @@ func NewServer(c *config.RaftConfig) *Raft {
 	}
 	r.electionTimer = time.NewTimer(time.Millisecond * time.Duration(RandInt64(150, 300)))
 	r.heartBeatTimer = time.NewTimer(time.Millisecond * time.Duration(RandInt64(100, 150)))
-	//生成 transport
+	//生成 raft
 	rc := member.NewRaftCluster(c.LocalAddr, c.ClusterAddr)
 	r.transport = transport.NewTransport(rc)
 	r.id = uint64(rc.LocalID())
@@ -88,7 +88,7 @@ func (r *Raft) handle(rm transport.RaftMessage) error {
 			return nil
 		} else {
 			log.Printf("id:%d reject vote from id:%d,its term:%d and lastIndex:%d", r.id, rm.From, rm.Term, rm.LogIndex)
-			r.transport.SendMessage(transport.RaftMessage{To: rm.From, From: r.id, Success: false, Type: transport.MsgVote})
+			r.transport.SendMessage(transport.RaftMessage{To: rm.From, From: r.id, Success: false, Type: transport.MsgVoteResp})
 			return nil
 		}
 	case transport.MsgVoteResp:
@@ -139,7 +139,8 @@ func (r *Raft) handle(rm transport.RaftMessage) error {
 					r.currentTerm = rm.Term
 					r.rwLock.Unlock()
 				}
-				log.Printf("accept success,receive heartbeat from id:%d,its term:%d,current term:%d,id:%d", rm.From, rm.Term, r.currentTerm, r.id)
+				log.Printf("accept success,receive heartbeat from id:%d,its term:%d,current term:%d,id:%d",
+					rm.From, rm.Term, r.currentTerm, r.id)
 				r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
 				r.transport.SendMessage(transport.RaftMessage{From: r.id, To: rm.From, Success: true, Type: transport.MsgHeartBeatResp})
 			} else {
@@ -182,7 +183,8 @@ func (r *Raft) broadcastAppend() {
 		if r.id == peerId {
 			continue
 		}
-		r.transport.SendMessage(transport.RaftMessage{From: r.id, To: peerId, Term: r.currentTerm, Type: transport.MsgHeartbeat})
+		r.transport.SendMessage(transport.RaftMessage{From: r.id, To: peerId,
+			Term: r.currentTerm, Type: transport.MsgHeartbeat})
 	}
 }
 
@@ -215,13 +217,22 @@ func (r *Raft) run() {
 			} else {
 				continue
 			}
+		case receiveMessage := <-r.transport.MsgWaitToHandle:
+			log.Printf("id:%d will to hanle message:%+v", r.id, receiveMessage)
+			go func() {
+				err := r.handle(receiveMessage)
+				if err != nil {
+					log.Printf("id:%d handle mesage error,message:%+v,error:%v",
+						r.id, receiveMessage, err)
+				}
+			}()
 		}
 	}
 }
 
 func (r *Raft) becomeCandidate() {
 	r.rwLock.Lock()
-	r.currentTerm++
+	r.currentTerm += 1
 	r.state = CANDIDATE
 	r.lead = 0
 	r.voteFor = r.id
@@ -233,10 +244,16 @@ func (r *Raft) becomeCandidate() {
 func (r *Raft) broadcastVote() {
 	r.rwLock.RLock()
 	defer r.rwLock.RUnlock()
+	log.Printf("id:%d start to send vote current term:%d  ", r.id, r.currentTerm)
 	for _, peerId := range r.peers {
 		if r.id == peerId {
 			continue
 		}
-		r.transport.SendMessage(transport.RaftMessage{From: r.id, To: peerId, Term: r.currentTerm, LogIndex: r.commitIndex, Type: transport.MsgVote})
+		r.transport.SendMessage(transport.RaftMessage{From: r.id, To: peerId, Term: r.currentTerm,
+			LogIndex: r.commitIndex, Type: transport.MsgVote})
 	}
+}
+
+func (r *Raft) ID() uint64 {
+	return r.id
 }

@@ -23,5 +23,8 @@ func NewMember(peerAddr string) *Member {
 	//generate ID
 	member.ID = types.GenerateID(peerAddr)
 	return member
+}
 
+func (m *Member) PeerAddr() string {
+	return m.peerAddr
 }

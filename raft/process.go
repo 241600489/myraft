@@ -1,4 +1,4 @@
-package myraft
+package raft
 
 type VoteResult uint8
 
