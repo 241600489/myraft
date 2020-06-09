@@ -37,19 +37,21 @@ type Raft struct {
 	pr             *ProcessHandler
 	transport      *transport.Transport
 	lead           uint64
+	electionTick   uint32 //接收到一次心跳设置为1 应付重置选举定时器 时还接收到 定时器中channel 的数据
 }
 
 func NewServer(c *config.RaftConfig) *Raft {
 
 	r := &Raft{
-		state:       FOLLOWER,
-		currentTerm: 0, //todo 从持久化信息读取
-		rwLock:      &sync.RWMutex{},
-		voteFor:     0, //默认为空
-		commitIndex: 0, //todo 从持久化信息读取
-		lastApplied: 0, //todo 从持久化信息读取
-		nextIndex:   nil,
-		matchIndex:  nil,
+		state:        FOLLOWER,
+		currentTerm:  0, //todo 从持久化信息读取
+		rwLock:       &sync.RWMutex{},
+		voteFor:      0, //默认为空
+		commitIndex:  0, //todo 从持久化信息读取
+		lastApplied:  0, //todo 从持久化信息读取
+		nextIndex:    nil,
+		matchIndex:   nil,
+		electionTick: 0,
 	}
 	r.electionTimer = time.NewTimer(time.Millisecond * time.Duration(RandInt64(150, 300)))
 	r.heartBeatTimer = time.NewTimer(time.Millisecond * time.Duration(RandInt64(100, 150)))
@@ -91,7 +93,12 @@ func (r *Raft) handle(rm transport.RaftMessage) error {
 			r.transport.SendMessage(transport.RaftMessage{To: rm.From, From: r.id, Success: false, Type: transport.MsgVoteResp})
 			return nil
 		}
+
 	case transport.MsgVoteResp:
+		if r.state == LEADER || r.state == FOLLOWER {
+			log.Printf("id:%d,current state:%d,will not handle msg vote resp", r.id, r.state)
+			return nil
+		}
 		//todo 投票响应消息
 		r.pr.recordVote(rm.From, rm.Success)
 		granted, rejected, re := r.pr.countVotes()
@@ -130,18 +137,21 @@ func (r *Raft) handle(rm transport.RaftMessage) error {
 			return nil
 		case FOLLOWER:
 			//判断term 大小
+
 			if rm.Term >= r.currentTerm {
+
 				//接受
 				if rm.Term > r.currentTerm {
 					log.Printf("change term ,receive heart from id:%d,its term:%d > current term:%d,current id:%d ",
 						rm.From, rm.Term, r.currentTerm, r.id)
-					r.rwLock.Lock()
 					r.currentTerm = rm.Term
-					r.rwLock.Unlock()
+
 				}
 				log.Printf("accept success,receive heartbeat from id:%d,its term:%d,current term:%d,id:%d",
 					rm.From, rm.Term, r.currentTerm, r.id)
-				r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
+				//r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
+				r.electionTick += 1
+
 				r.transport.SendMessage(transport.RaftMessage{From: r.id, To: rm.From, Success: true, Type: transport.MsgHeartBeatResp})
 			} else {
 				//不接受
@@ -171,8 +181,8 @@ func (r *Raft) becomeLeader() {
 	r.rwLock.Unlock()
 	r.state = LEADER
 	r.voteFor = 0
-	r.heartBeatTimer =
-		time.NewTimer(time.Millisecond * time.Duration(RandInt64(100, 150)))
+	r.heartBeatTimer.Reset(time.Millisecond * time.Duration(RandInt64(100, 150)))
+	r.electionTimer.Stop()
 	r.pr.ResetVotes()
 }
 
@@ -196,27 +206,42 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	r.lead = lead
 	r.state = FOLLOWER
 	r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
+	r.heartBeatTimer.Stop()
 	r.pr.ResetVotes()
 }
-
 func (r *Raft) run() {
 	for {
 		select {
 		case <-r.electionTimer.C:
+			if r.electionTick > 0 {
+				r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
+
+				log.Printf("id:%d have receive heart beat so do not become candidate", r.id)
+				r.rwLock.Lock()
+				r.electionTick = 0
+				r.rwLock.Unlock()
+				continue
+			}
 			if r.state == LEADER || r.state == CANDIDATE {
+				r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
 				//todo 当为candidate时则说明 遇到网络延迟没有接收到大多数票
 				continue
 			}
 			log.Printf("id:%d will become candidate ", r.id)
 			r.becomeCandidate()
 			r.broadcastVote()
+			r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
 
 		case <-r.heartBeatTimer.C:
+			log.Printf("id:%d current state:%d want to send broad heart beat", r.id, r.state)
 			if r.state == LEADER {
 				r.broadcastAppend()
+				r.heartBeatTimer.Reset(time.Millisecond * time.Duration(RandInt64(100, 150)))
 			} else {
+				r.heartBeatTimer.Reset(time.Millisecond * time.Duration(RandInt64(100, 150)))
 				continue
 			}
+			r.heartBeatTimer.Reset(time.Millisecond * time.Duration(RandInt64(100, 150)))
 		case receiveMessage := <-r.transport.MsgWaitToHandle:
 			log.Printf("id:%d will to hanle message:%+v", r.id, receiveMessage)
 			go func() {

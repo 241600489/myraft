@@ -1,5 +1,10 @@
 package raft
 
+import (
+	"log"
+	"sync"
+)
+
 type VoteResult uint8
 
 const (
@@ -12,17 +17,20 @@ const (
 type ProcessHandler struct {
 	Votes map[uint64]bool //选举票分布
 	peers []uint64        //peer 列表
-
+	rw    *sync.RWMutex
 }
 
 func MakeProcessHandler(peers []uint64) *ProcessHandler {
 	return &ProcessHandler{
 		Votes: make(map[uint64]bool),
 		peers: peers,
+		rw:    &sync.RWMutex{},
 	}
 }
 
 func (ph *ProcessHandler) recordVote(id uint64, v bool) {
+	ph.rw.Lock()
+	defer ph.rw.Unlock()
 	_, ok := ph.Votes[id]
 	if !ok {
 		ph.Votes[id] = v
@@ -30,6 +38,8 @@ func (ph *ProcessHandler) recordVote(id uint64, v bool) {
 }
 
 func (ph *ProcessHandler) countVotes() (granted int, rejected int, re VoteResult) {
+	ph.rw.RLock()
+	defer ph.rw.RUnlock()
 	var missing int
 	for _, id := range ph.peers {
 		v, voted := ph.Votes[id]
@@ -44,13 +54,14 @@ func (ph *ProcessHandler) countVotes() (granted int, rejected int, re VoteResult
 		}
 	}
 	majorPeer := len(ph.peers)/2 + 1
+	log.Printf("major peer :%d,granted:%d,rejected:%d", majorPeer, granted, rejected)
 	if granted >= majorPeer {
 		re = VoteWon
-	}
-	if granted+missing >= majorPeer {
+	} else if granted+missing >= majorPeer {
 		re = VoteWaiting
+	} else {
+		re = VoteLost
 	}
-	re = VoteLost
 	return granted, rejected, re
 }
 
