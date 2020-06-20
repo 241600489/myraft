@@ -27,6 +27,9 @@ func InitConfig(path string) map[string]string {
 			panic(err)
 		}
 		s := strings.TrimSpace(string(b))
+		if strings.HasPrefix(s, "#") {
+			continue
+		}
 		index := strings.Index(s, "=")
 		if index < 0 {
 			continue

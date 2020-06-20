@@ -233,7 +233,6 @@ func (r *Raft) run() {
 			r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
 
 		case <-r.heartBeatTimer.C:
-			log.Printf("id:%d current state:%d want to send broad heart beat", r.id, r.state)
 			if r.state == LEADER {
 				r.broadcastAppend()
 				r.heartBeatTimer.Reset(time.Millisecond * time.Duration(RandInt64(100, 150)))
