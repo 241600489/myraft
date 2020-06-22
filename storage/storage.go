@@ -72,4 +72,5 @@ func (ps *PersistStorage) AppendEntries(ens []transport.Entry) bool {
 		//ps.storeDir+"/"
 		//os.Create("")
 	}
+	return false
 }
