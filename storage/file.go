@@ -3,13 +3,15 @@ package storage
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log"
+	"myraft/utils"
 	"os"
 )
 
 const (
 	//65536* 2
-	ZMaxByteBufferSize int = 2
+	ZMaxByteBufferSize int = 65536
 )
 
 type WritableFile struct {
@@ -87,5 +89,47 @@ func (wf *WritableFile) Close() {
 	err := wf.dest.Close()
 	if err != nil {
 		fmt.Printf("close file:%s error:%v", wf.fileName, err)
+	}
+}
+
+type SequentialFile struct {
+	file     *os.File
+	fileName string
+}
+
+func (sf *SequentialFile) Read(size uint64) *utils.SliceWrap {
+	for {
+		scratch := make([]byte, size)
+		count, err := sf.file.Read(scratch)
+		if err != nil {
+			log.Printf("read from file:%s fail,err:%v", sf.fileName, err)
+			continue
+		}
+		return utils.NewSliceWrap(scratch, uint64(count))
+	}
+}
+func (sf *SequentialFile) Skip(n uint64) bool {
+	_, err := sf.file.Seek(int64(n), io.SeekCurrent)
+	if err != nil {
+		log.Printf("skip %d count byte fail,err:%v", n, err)
+		return false
+	}
+	return false
+}
+
+func (sf *SequentialFile) Close() {
+	err := sf.file.Close()
+	if err != nil {
+		log.Printf("close file fail,fileName:%s,err:%v", sf.fileName, err)
+	}
+}
+func NewSequentialFile(fileName string) *SequentialFile {
+	dest, err := os.Open(fileName)
+	if err != nil {
+		log.Printf("open file fail,file name:%s,err:%v", fileName, err)
+	}
+	return &SequentialFile{
+		file:     dest,
+		fileName: fileName,
 	}
 }
