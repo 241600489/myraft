@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -26,4 +27,34 @@ func TestWriter_AddRecord(t *testing.T) {
 	}
 
 	writableFile.Close()
+}
+
+func TestNewReaderAndReadRecord(t *testing.T) {
+	test1 := NewWritableFile("./test1.log")
+	test1.Append([]byte("fdasfsafa"))
+	test1.Close()
+	readableFile := NewSequentialFile("./test1.log")
+	reader := NewReader(readableFile, 0)
+	for {
+		ok, result := reader.ReadRecord()
+		if ok {
+			fmt.Println(string(result))
+			continue
+		}
+		break
+	}
+	readableFile.Close()
+}
+func TestReader_SkipInitialBlock(t *testing.T) {
+	readableFile := NewSequentialFile("./test1.log")
+	reader := NewReader(readableFile, 15)
+	for {
+		ok, result := reader.ReadRecord()
+		if ok {
+			fmt.Println(string(result))
+			continue
+		}
+		break
+	}
+	readableFile.Close()
 }

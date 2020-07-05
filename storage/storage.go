@@ -40,7 +40,7 @@ type PersistStorage struct {
 func (ps *PersistStorage) AppendEntries(ens []transport.Entry) bool {
 	stat, err := ps.dataFile.Stat()
 	if err != nil {
-		log.Fatal("get data file stat fail,%+v", err)
+		log.Printf("get data file stat fail,%v", err)
 	}
 	//获取data的文件长度 如果超过 1g 则创建一个新的文件
 	currentDataSize := stat.Size()
@@ -69,8 +69,9 @@ func (ps *PersistStorage) AppendEntries(ens []transport.Entry) bool {
 			log.Panicf("close data file %s fail,err:%+v", ps.dataFile.Name(), err)
 		}
 		//
-		//ps.storeDir+"/"
-		//os.Create("")
+		//newFileDir :=ps.storeDir+"/"+generateFileName()
+
+		os.Create("")
 	}
 	return false
 }
