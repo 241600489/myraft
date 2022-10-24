@@ -70,7 +70,8 @@ func RandInt64(min, max int64) int64 {
 	if min >= max || min == 0 || max == 0 {
 		return max
 	}
-	return rand.Int63n(max-min) + min
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return r.Int63n(max-min) + min
 }
 
 func (r *Raft) Transport() *transport.Transport {
@@ -87,6 +88,7 @@ func (r *Raft) handle(rm transport.RaftMessage) error {
 			r.voteFor = rm.From
 			r.transport.SendMessage(transport.RaftMessage{To: rm.From, From: r.id, Success: true, Type: transport.MsgVoteResp})
 			log.Printf("id:%d vote for id:%d ,its term:%d and lastIndex:%d", r.id, rm.From, rm.Term, rm.LogIndex)
+			r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
 			return nil
 		} else {
 			log.Printf("id:%d reject vote from id:%d,its term:%d and lastIndex:%d", r.id, rm.From, rm.Term, rm.LogIndex)
@@ -222,7 +224,7 @@ func (r *Raft) run() {
 				r.rwLock.Unlock()
 				continue
 			}
-			if r.state == LEADER || r.state == CANDIDATE {
+			if r.state == LEADER || r.state == CANDIDATE || r.voteFor > 0 {
 				r.electionTimer.Reset(time.Millisecond * time.Duration(RandInt64(150, 300)))
 				//todo 当为candidate时则说明 遇到网络延迟没有接收到大多数票
 				continue
@@ -242,7 +244,6 @@ func (r *Raft) run() {
 			}
 			r.heartBeatTimer.Reset(time.Millisecond * time.Duration(RandInt64(100, 150)))
 		case receiveMessage := <-r.transport.MsgWaitToHandle:
-			log.Printf("id:%d will to hanle message:%+v", r.id, receiveMessage)
 			go func() {
 				err := r.handle(receiveMessage)
 				if err != nil {
